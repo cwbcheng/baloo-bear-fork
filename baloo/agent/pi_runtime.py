@@ -651,6 +651,10 @@ class PIAgentBase:
             await review_logger.json_parse_failed(
                 raw_text=result.assistant_text, char_count=len(result.assistant_text)
             )
+            if "{" not in result.assistant_text:
+                err = RuntimeError("Agent returned text instead of a JSON object")
+                err.metadata = metadata  # type: ignore[attr-defined]
+                raise err
             logger.info("%s: requesting JSON retry", self.agent_name)
             await review_logger.json_retry_started()
             structured_output, retry_metadata, retry_raw_text = await self._retry_json(
