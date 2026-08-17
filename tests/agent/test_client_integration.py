@@ -145,7 +145,12 @@ class TestBalooAgentErrorHandling:
 
     @pytest.mark.asyncio
     async def test_review_pr_handles_empty_response(self, sample_pr_context):
-        """Test handling of empty structured output (no JSON in response)."""
+        """Test handling of empty structured output (no JSON in response).
+
+        An agent that ends its turn with NO assistant text at all must be
+        treated as an error — approving a PR on empty output would be a false
+        pass.  (First-principles fix; previously this "approved" silently.)
+        """
         events = _make_pi_events(None)
         agent = BalooAgent()
 
@@ -154,7 +159,7 @@ class TestBalooAgentErrorHandling:
             result = await agent.review_pr(sample_pr_context)
 
             assert result.comments == []
-            assert result.approve is True  # No issues = approve
+            assert result.metadata.get("agent_error") is True  # not a silent approve
 
     @pytest.mark.asyncio
     async def test_max_turns_reached_sets_error_category(self, sample_pr_context):
@@ -243,7 +248,7 @@ class TestBalooAgentSuccessPath:
             assert result.comments == []
             assert result.approve is True
             assert result.request_changes is False
-            assert "No issues found" in result.summary
+            assert "未发现问题" in result.summary
 
     @pytest.mark.asyncio
     async def test_review_pr_medium_severity_approves(self, sample_pr_context):
@@ -382,7 +387,7 @@ class TestBalooAgentSeveritySummary:
             mock_exec.return_value = _mock_pi_process(events)
             result = await agent.review_pr(sample_pr_context)
 
-            assert "Critical" in result.summary
+            assert "严重" in result.summary
             assert "🔴" in result.summary
 
     @pytest.mark.asyncio
@@ -398,7 +403,7 @@ class TestBalooAgentSeveritySummary:
             mock_exec.return_value = _mock_pi_process(events)
             result = await agent.review_pr(sample_pr_context)
 
-            assert "LOW" in result.summary
+            assert "低" in result.summary
             assert "🔵" in result.summary
 
 
@@ -475,6 +480,72 @@ class TestBalooAgentFallback:
                 # Should fail (no fallback attempted)
                 assert "error" in result.summary.lower() or "failed" in result.summary.lower()
 
+    @pytest.mark.asyncio
+    async def test_transient_error_retries_same_model(self, sample_pr_context):
+        """An 'error stop reason' transient failure retries the primary model once."""
+        # First run ends with error stop reason (message_end stopReason == "error")
+        fail_events = [
+            json.dumps(
+                {"type": "response", "command": "set_thinking_level", "success": True}
+            ).encode()
+            + b"\n",
+            json.dumps(
+                {
+                    "type": "response",
+                    "command": "prompt",
+                    "success": True,
+                }
+            ).encode()
+            + b"\n",
+            json.dumps(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "model": "deepseek-v4-flash",
+                        "stopReason": "error",
+                        "content": [],
+                        "usage": {
+                            "input": 100,
+                            "output": 10,
+                            "cacheRead": 0,
+                            "cacheWrite": 0,
+                            "cost": {"total": 0.001},
+                        },
+                    },
+                }
+            ).encode()
+            + b"\n",
+            json.dumps({"type": "agent_end"}).encode() + b"\n",
+        ]
+        success_events = _make_pi_events({"findings": [], "summary": {}})
+
+        agent = BalooAgent()
+        call_count = 0
+
+        async def fake_sleep(_seconds):
+            return None
+
+        with (
+            patch("baloo.agent.pi_runtime.asyncio.create_subprocess_exec") as mock_exec,
+            patch("baloo.agent.client.asyncio.sleep", new=fake_sleep),
+        ):
+
+            def side_effect(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return _mock_pi_process(fail_events)
+                return _mock_pi_process(success_events)
+
+            mock_exec.side_effect = side_effect
+
+            result = await agent.review_pr(sample_pr_context)
+
+            assert call_count == 2, "Transient failure should retry once"
+            assert result.metadata.get("retried_transient_error") is True
+            assert result.approve is True
+
 
 class TestBalooAgentMetadata:
     """Tests for metadata in reviews."""
@@ -520,6 +591,6 @@ class TestBalooAgentMetadata:
 
         result = CommentFormatter.format_summary([], metadata)
 
-        assert "**Model:** `claude-sonnet-4-6`" in result
+        assert "**模型:** `claude-sonnet-4-6`" in result
         assert "**Cache:** 200 write / 1,000 read" in result
-        assert "**Cost:** $0.1000" in result
+        assert "**费用:** $0.1000" in result

@@ -66,6 +66,7 @@ SETTING_CATEGORIES = {
         "agent_fallback_model",
         "agent_max_tokens",
         "agent_temperature",
+        "agent_max_turns",
         "pi_binary_path",
         "pi_thinking_level",
     },
@@ -74,6 +75,8 @@ SETTING_CATEGORIES = {
         "review_auto_approve",
         "review_min_severity",
         "review_use_checks_api",
+        "review_post_all_severities",
+        "review_use_request_changes",
     },
     "Database": {"database_url", "database_enabled", "installation_id"},
     "Dashboard": {

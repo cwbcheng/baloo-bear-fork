@@ -1,5 +1,6 @@
 """PI-based agent client for code review."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -14,6 +15,26 @@ from baloo.processor.decision_engine import DecisionEngine
 from baloo.processor.formatter import CommentFormatter
 
 logger = logging.getLogger(__name__)
+
+# Error patterns that indicate a transient failure worth retrying (same model)
+_TRANSIENT_ERROR_PATTERNS = (
+    "error stop reason",
+    "rate limit",
+    "429",
+    "503",
+    "502",
+    "timeout",
+    "timed out",
+    "temporarily",
+    "internal server error",
+    "overloaded",
+)
+
+
+def _is_transient_error(err: Exception) -> bool:
+    """True when an agent error is likely transient and retrying may succeed."""
+    msg = str(err).lower()
+    return any(pattern in msg for pattern in _TRANSIENT_ERROR_PATTERNS)
 
 
 class BalooAgent(PIAgentBase):
@@ -163,13 +184,33 @@ class BalooAgent(PIAgentBase):
         return "agent_error"
 
     async def _run_with_fallback(self, query: str, review_logger: Any = None):
-        """Run query with automatic fallback to secondary model on failure."""
+        """Run query with automatic retry on transient errors, then fallback model."""
         from baloo.config.settings import get_settings
 
         try:
             return await self.run_query(query, review_logger=review_logger)
         except Exception as primary_err:
             settings = get_settings()
+
+            # Retry the primary model once on transient failures (API hiccups,
+            # error stop reasons, rate limits). Cheap and avoids noisy fallbacks.
+            if _is_transient_error(primary_err):
+                logger.warning(
+                    "Transient agent error (%s), retrying %s/%s after 30s...",
+                    primary_err,
+                    self.options.provider,
+                    self.options.model,
+                )
+                await asyncio.sleep(30)
+                try:
+                    result = await self.run_query(query, review_logger=review_logger)
+                    result[1]["retried_transient_error"] = True
+                    result[1]["retry_error"] = str(primary_err)
+                    return result
+                except Exception as retry_err:
+                    logger.warning("Retry of primary model also failed: %s", retry_err)
+                    primary_err = retry_err
+
             fallback = settings.agent_fallback_model
             if not fallback or "/" not in fallback:
                 raise  # No valid fallback configured

@@ -216,19 +216,19 @@ class TestGetDecisionSummary:
     def test_approved_summary(self):
         """Approved decision should have appropriate summary."""
         summary = DecisionEngine.get_decision_summary(approve=True, request_changes=False)
-        assert "Approved" in summary
+        assert "已通过" in summary
         assert "✅" in summary
 
     def test_request_changes_summary(self):
         """Request changes decision should have appropriate summary."""
         summary = DecisionEngine.get_decision_summary(approve=False, request_changes=True)
-        assert "Changes Requested" in summary
+        assert "需要修改" in summary
         assert "❌" in summary
 
     def test_comments_only_summary(self):
         """Comments only decision should have appropriate summary."""
         summary = DecisionEngine.get_decision_summary(approve=False, request_changes=False)
-        assert "Comments Only" in summary
+        assert "仅评论" in summary
         assert "💬" in summary
 
 

@@ -174,7 +174,7 @@ async def test_review_summary_uses_actionable_findings_after_resolved_thread_ski
         )
 
     posted_review = mock_github_client.post_review.call_args.args[2]
-    assert "**Total**: 1 issue(s) found" in posted_review.summary
+    assert "**共发现**: 1 个问题" in posted_review.summary
     assert "**Total**: 2 issue(s) found" not in posted_review.summary
     assert "✅ Skipped 1 resolved thread(s)." in posted_review.summary
 
@@ -256,9 +256,9 @@ async def test_progress_comment_reports_dropped_inline_findings_internally():
         )
 
     completion_msg = mock_github_client.edit_comment.call_args.args[2]
-    assert "Found 2 issue(s)" in completion_msg
-    assert "Posted 1 inline comment(s)." in completion_msg
-    assert "could not be placed inline" in completion_msg
+    assert "共发现 2 个问题" in completion_msg
+    assert "已发布 1 条行内评论" in completion_msg
+    assert "无法定位到行内" in completion_msg
     assert "Dropped high finding with enough detail" in completion_msg
 
 
@@ -1036,7 +1036,7 @@ async def test_updates_progress_comment_when_no_actionable_findings():
         call_args = mock_github_client.edit_comment.call_args
         assert call_args[0][0] == "test/repo"
         assert call_args[0][1] == 12345  # The comment ID
-        assert "No issues found" in call_args[0][2] or "review completed" in call_args[0][2].lower()
+        assert "未发现新问题" in call_args[0][2] or "审查完成" in call_args[0][2]
 
 
 @pytest.mark.asyncio

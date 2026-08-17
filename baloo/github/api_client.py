@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from baloo.config.settings import get_settings
 from baloo.github.auth import GitHubAuth
 from baloo.github.discussions import (
     build_discussion_digest,
@@ -170,7 +171,7 @@ class GitHubAPIClient:
         """GET a GitHub endpoint, retrying transient transport failures."""
         for attempt in range(1, _GITHUB_GET_ATTEMPTS + 1):
             try:
-                return await self._http.get(url, **kwargs)
+                response = await self._http.get(url, **kwargs)
             except httpx.TransportError as exc:
                 if attempt >= _GITHUB_GET_ATTEMPTS:
                     raise
@@ -183,8 +184,64 @@ class GitHubAPIClient:
                     exc,
                 )
                 await asyncio.sleep(_GITHUB_GET_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+                continue
+
+            if not (
+                response.status_code == 403
+                and "Resource not accessible by integration" in response.text
+                and attempt < _GITHUB_GET_ATTEMPTS
+            ):
+                return response
+
+            headers = dict(kwargs.get("headers") or {})
+            stale_token = headers.get("Authorization", "").removeprefix("Bearer ")
+            fresh_token = self.auth.refresh_installation_token(
+                self.installation_id, stale_token
+            )
+            headers["Authorization"] = f"Bearer {fresh_token}"
+            kwargs["headers"] = headers
+            logger.warning(
+                "GitHub rejected an installation token for %s; refreshed it (attempt %d/%d)",
+                url,
+                attempt,
+                _GITHUB_GET_ATTEMPTS,
+            )
+            await asyncio.sleep(_GITHUB_GET_BACKOFF_SECONDS * (2 ** (attempt - 1)))
 
         raise RuntimeError("unreachable")
+
+    async def _post(self, url: str, **kwargs) -> httpx.Response:
+        """POST a GitHub endpoint, retrying transient transport failures.
+
+        A transient TLS/network failure on a write call (e.g. posting the
+        "reviewing" progress comment) used to abort the whole review; retrying
+        matches the read path (_get) behavior.
+        """
+        for attempt in range(1, _GITHUB_GET_ATTEMPTS + 1):
+            try:
+                return await self._http.post(url, **kwargs)
+            except httpx.TransportError as exc:
+                if attempt >= _GITHUB_GET_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "Transient GitHub API POST failure for %s (attempt %d/%d): %s: %s",
+                    url,
+                    attempt,
+                    _GITHUB_GET_ATTEMPTS,
+                    type(exc).__name__,
+                    exc,
+                )
+                await asyncio.sleep(_GITHUB_GET_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+
+        raise RuntimeError("unreachable")
+
+    async def get_pr_head_sha(self, repo_full_name: str, pr_number: int) -> str:
+        """Fetch the current head SHA of a pull request (lightweight, no diff)."""
+        headers = self._get_headers()
+        pr_url = f"{self.base_url}/repos/{repo_full_name}/pulls/{pr_number}"
+        pr_response = await self._get(pr_url, headers=headers)
+        pr_response.raise_for_status()
+        return pr_response.json()["head"]["sha"]
 
     async def get_pr_context(self, repo_full_name: str, pr_number: int) -> PRContext:
         """
@@ -435,10 +492,17 @@ class GitHubAPIClient:
                 )
 
         # Determine review event
-        # Note: We intentionally never use REQUEST_CHANGES to avoid blocking PRs.
+        # Note: By default we never use REQUEST_CHANGES to avoid blocking PRs.
         # Baloo provides feedback via comments but lets humans make merge decisions.
+        # Set REVIEW_USE_REQUEST_CHANGES=true to submit REQUEST_CHANGES when the
+        # decision engine found blocking (critical/high) findings.
         if review_result.approve:
             event = "APPROVE"
+        elif (
+            review_result.request_changes
+            and get_settings().review_use_request_changes
+        ):
+            event = "REQUEST_CHANGES"
         else:
             event = "COMMENT"
 
@@ -505,7 +569,7 @@ class GitHubAPIClient:
             The comment ID
         """
         comment_url = f"{self.base_url}/repos/{repo_full_name}/issues/{pr_number}/comments"
-        response = await self._http.post(
+        response = await self._post(
             comment_url,
             headers=self._get_headers(),
             json={"body": comment},
@@ -523,12 +587,23 @@ class GitHubAPIClient:
             comment: New comment text
         """
         comment_url = f"{self.base_url}/repos/{repo_full_name}/issues/comments/{comment_id}"
-        response = await self._http.patch(
-            comment_url,
-            headers=self._get_headers(),
-            json={"body": comment},
-        )
-        response.raise_for_status()
+        for attempt in range(1, _GITHUB_GET_ATTEMPTS + 1):
+            try:
+                response = await self._http.patch(
+                    comment_url,
+                    headers=self._get_headers(),
+                    json={"body": comment},
+                )
+                response.raise_for_status()
+                break
+            except httpx.TransportError as exc:
+                if attempt >= _GITHUB_GET_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "Transient GitHub API PATCH failure for %s (attempt %d/%d): %s",
+                    comment_url, attempt, _GITHUB_GET_ATTEMPTS, exc,
+                )
+                await asyncio.sleep(_GITHUB_GET_BACKOFF_SECONDS * (2 ** (attempt - 1)))
 
     async def add_reaction(
         self, repo_full_name: str, comment_id: int, content: str = "eyes"
@@ -541,6 +616,30 @@ class GitHubAPIClient:
             json={"content": content},
         )
         response.raise_for_status()
+
+    async def remove_eyes_reaction(
+        self, repo_full_name: str, comment_id: int
+    ) -> bool:
+        """Remove the 'eyes' reaction from a comment (review completion indicator).
+
+        Returns True if an eyes reaction was found and removed, False otherwise.
+        """
+        headers = self._get_headers()
+        reactions_url = (
+            f"{self.base_url}/repos/{repo_full_name}/issues/comments/{comment_id}/reactions"
+        )
+        response = await self._get(reactions_url, headers=headers)
+        response.raise_for_status()
+
+        for reaction in response.json():
+            if reaction.get("content") == "eyes":
+                delete_url = f"{reactions_url}/{reaction['id']}"
+                del_resp = await self._http.delete(delete_url, headers=headers)
+                del_resp.raise_for_status()
+                logger.info("Removed eyes reaction from comment %s", comment_id)
+                return True
+
+        return False
 
     async def reply_to_review_comment(
         self,

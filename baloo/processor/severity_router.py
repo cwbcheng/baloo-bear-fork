@@ -1,5 +1,6 @@
 """Route review findings by severity and provide counting utilities."""
 
+from baloo.config.settings import get_settings
 from baloo.github.models import ReviewComment, ReviewSeverity
 
 
@@ -42,14 +43,19 @@ def route_findings(findings: list[ReviewComment]) -> dict:
     """
     review_findings = []
     checks_findings = []
+    post_all = get_settings().review_post_all_severities
 
     for finding in findings:
         severity = finding.severity.upper()
         if severity in [ReviewSeverity.CRITICAL.value, ReviewSeverity.HIGH.value]:
             review_findings.append(finding)
         elif severity == ReviewSeverity.MEDIUM.value:
-            checks_findings.append(finding)
-        # LOW severity is currently not routed to a specific GitHub reporting mechanism
-        # but could be added to the digest.
+            if post_all:
+                review_findings.append(finding)
+            else:
+                checks_findings.append(finding)
+        elif severity == ReviewSeverity.LOW.value and post_all:
+            # LOW is posted as a review comment when REVIEW_POST_ALL_SEVERITIES is enabled
+            review_findings.append(finding)
 
     return {"review": review_findings, "checks": checks_findings}

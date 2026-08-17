@@ -18,7 +18,11 @@ class FindingsFilter:
 
     def __init__(self):
         """Initialize the findings filter."""
-        self.min_severity = settings.review_min_severity
+        self.min_severity = (
+            "LOW"
+            if settings.review_post_all_severities
+            else settings.review_min_severity
+        )
 
     def filter_findings(self, comments: list[ReviewComment]) -> list[ReviewComment]:
         """

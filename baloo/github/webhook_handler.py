@@ -72,13 +72,16 @@ async def _run_review_command(
 ) -> None:
     """Acknowledge a `@baloo review` command with a reaction, then run a full review.
 
-    Passes head_sha="" so the review skips DB-level dedup and always re-runs — an explicit
-    command means "review the current head now", even if it was reviewed before.
+    Fetches the current head SHA from GitHub so the review is recorded in the
+    database (dedup still allows re-review of a completed commit; only a
+    concurrently in-progress review of the same SHA conflicts).
     """
+    head_sha = ""
     if comment_id is not None:
         try:
             async with GitHubAPIClient(installation_id) as gh_client:
                 await gh_client.add_reaction(repo_full_name, comment_id, "eyes")
+                head_sha = await gh_client.get_pr_head_sha(repo_full_name, pr_number)
         except Exception:
             logger.warning(
                 "Failed to react to @baloo review command on %s#%s",
@@ -87,16 +90,31 @@ async def _run_review_command(
                 exc_info=True,
             )
 
-    await process_pr_review(
-        repo_full_name,
-        pr_number,
-        installation_id,
-        trigger_reason="issue_comment:@baloo review",
-        notify_progress=True,
-        synchronize_base_sha=None,
-        head_sha="",
-        delivery_id=delivery_id,
-    )
+    try:
+        await process_pr_review(
+            repo_full_name,
+            pr_number,
+            installation_id,
+            trigger_reason="issue_comment:@baloo review",
+            notify_progress=True,
+            synchronize_base_sha=None,
+            head_sha=head_sha,
+            delivery_id=delivery_id,
+        )
+    finally:
+        # Remove the "eyes" acknowledgment once the review run is over (success or failure)
+        if comment_id is not None:
+            try:
+                async with GitHubAPIClient(installation_id) as gh_client:
+                    await gh_client.remove_eyes_reaction(repo_full_name, comment_id)
+            except Exception:
+                logger.warning(
+                    "Failed to remove eyes reaction on %s#%s comment=%s",
+                    repo_full_name,
+                    pr_number,
+                    comment_id,
+                    exc_info=True,
+                )
 
 
 @asynccontextmanager

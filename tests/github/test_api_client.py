@@ -400,6 +400,25 @@ class TestFetchPaginatedJson:
         assert mock_http.get.call_count == 3
         assert sleep.await_count == 2
 
+    @pytest.mark.asyncio
+    async def test_refreshes_rejected_installation_token(self, monkeypatch):
+        client, mock_http = _make_client()
+        client.auth.refresh_installation_token.return_value = "fresh"
+        monkeypatch.setattr("baloo.github.api_client.asyncio.sleep", AsyncMock())
+        mock_http.get.side_effect = [
+            _mock_response(
+                status_code=403,
+                text='{"message":"Resource not accessible by integration"}',
+            ),
+            _mock_response([{"id": 1}]),
+        ]
+
+        result = await client._fetch_paginated_json("https://api.github.com/some/endpoint")
+
+        assert result == [{"id": 1}]
+        client.auth.refresh_installation_token.assert_called_once_with(1, "tok")
+        assert mock_http.get.call_args.kwargs["headers"]["Authorization"] == "Bearer fresh"
+
 
 class TestGetChangedScopeBetweenCommits:
     @pytest.mark.asyncio

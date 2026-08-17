@@ -172,6 +172,7 @@ async def test_run_review_command_reacts_then_forces_full_review():
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
+    mock_client.get_pr_head_sha.return_value = "abc123def456"
 
     with (
         patch("baloo.github.webhook_handler.GitHubAPIClient", return_value=mock_client),
@@ -180,9 +181,11 @@ async def test_run_review_command_reacts_then_forces_full_review():
         await _run_review_command("org/repo", 7, 1, 555, "delivery-123")
 
     mock_client.add_reaction.assert_awaited_once_with("org/repo", 555, "eyes")
+    mock_client.get_pr_head_sha.assert_awaited_once_with("org/repo", 7)
     mock_review.assert_awaited_once()
     _, kwargs = mock_review.call_args
-    # head_sha="" forces a fresh review (skips DB-level dedup)
-    assert kwargs["head_sha"] == ""
+    # Fetches the current head SHA so the review is recorded in the database;
+    # completed commits can still be re-reviewed (dedup only blocks in-progress duplicates)
+    assert kwargs["head_sha"] == "abc123def456"
     assert kwargs["trigger_reason"] == "issue_comment:@baloo review"
     assert kwargs["synchronize_base_sha"] is None

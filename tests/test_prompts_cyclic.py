@@ -102,7 +102,7 @@ def test_prompt_includes_previous_baloo_recommendations():
     prompt = build_pr_review_prompt(pr_context)
 
     # Check that previous recommendations section exists
-    assert "Previous Baloo Recommendations" in prompt
+    assert "Baloo 此前的建议" in prompt
     assert "auth/cache.py:57" in prompt
     assert "Remove 'cached_at'" in prompt
 

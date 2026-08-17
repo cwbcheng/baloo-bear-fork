@@ -49,7 +49,7 @@ def test_prompt_includes_awaiting_discussions_count():
 
     prompt = build_pr_review_prompt(pr_context)
 
-    assert "Baloo is still waiting on **3** thread(s)" in prompt
+    assert "Baloo 仍在等待 **3** 条既有讨论线程被处理" in prompt
 
 
 def test_prompt_without_awaiting_discussions():

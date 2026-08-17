@@ -17,6 +17,7 @@ All Baloo settings are environment variables. Set them in `.env`, pass them via 
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | ✅ | — | Anthropic API key (for Claude models) |
 | `GEMINI_API_KEY` | — | — | Google Gemini API key (for fallback / Gemini models) |
+| `OPENCODE_API_KEY` | — | — | OpenCode Go subscription API key (https://opencode.ai/auth). Enables the built-in `opencode-go` provider (shipped with PI 0.73+): `opencode-go/deepseek-v4-flash`, `opencode-go/deepseek-v4-pro` |
 
 ## Application
 
@@ -34,11 +35,12 @@ All Baloo settings are environment variables. Set them in `.env`, pass them via 
 
 | Variable | Default | Description |
 |---|---|---|
-| `AGENT_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `google` |
+| `AGENT_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `google`, `opencode-go` (when `OPENCODE_API_KEY` is set) |
 | `AGENT_MODEL` | `sonnet` | Model short name or `provider/model` string. See [Models](features/models.md) |
 | `AGENT_FALLBACK_MODEL` | `google/gemini-2.5-flash` | Fallback model (`provider/model`). Empty to disable |
 | `AGENT_MAX_TOKENS` | `4096` | Max output tokens |
 | `AGENT_TEMPERATURE` | `0.2` | Generation temperature |
+| `AGENT_MAX_TURNS` | `30` | Max agent turns per review. Large PRs with big files may need 40+ |
 | `PI_BINARY_PATH` | `pi` | Path to PI binary |
 | `PI_THINKING_LEVEL` | `medium` | PI thinking level: `off`, `minimal`, `low`, `medium`, `high` |
 
@@ -49,6 +51,8 @@ All Baloo settings are environment variables. Set them in `.env`, pass them via 
 | `REVIEW_AUTO_APPROVE` | `true` | Auto-approve PRs with no CRITICAL/HIGH findings |
 | `REVIEW_MIN_SEVERITY` | `MEDIUM` | Minimum severity to post: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | `REVIEW_USE_CHECKS_API` | `true` | Post MEDIUM findings to Checks API instead of review comments |
+| `REVIEW_POST_ALL_SEVERITIES` | `false` | Post MEDIUM and LOW findings as PR review comments. Default `false`: MEDIUM goes to Checks API, LOW is filtered |
+| `REVIEW_USE_REQUEST_CHANGES` | `false` | Submit `REQUEST_CHANGES` review events when CRITICAL/HIGH findings exist. Default `false`: Baloo comments but never blocks merging |
 
 ## FP Verification
 

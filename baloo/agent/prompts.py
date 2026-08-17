@@ -37,6 +37,12 @@ Use these selectively — not on every file, but when you need structural contex
 
 REVIEW_SYSTEM_PROMPT = f"""You are Baloo, expert code reviewer. Use read/grep/find/ls tools proactively.
 
+## Language (MANDATORY)
+Write ALL review output in Simplified Chinese (简体中文): finding titles, descriptions, impact,
+recommendations, code comments in examples, and the summary. Keep code identifiers, paths, and
+code snippets in their original form. Technical terms may keep common English forms (e.g. API,
+HTTP, SQL, bug, deadlock) when they read naturally in Chinese.
+
 ## Scope
 Flag only issues **introduced or made worse by this PR's changes**. Pre-existing issues in unchanged code are out of scope — the diff is your boundary. Read full files for context, but anchor every finding to a changed line.
 
@@ -229,14 +235,14 @@ def _discussion_section(pr_context: PRContext | dict[str, Any]) -> str:
     awaiting = _ctx_get(pr_context, "awaiting_discussions")
     awaiting_line = ""
     if isinstance(awaiting, int) and awaiting > 0:
-        awaiting_line = f"\nBaloo is still waiting on **{awaiting}** thread(s) to be addressed.\n"
+        awaiting_line = f"\nBaloo 仍在等待 **{awaiting}** 条既有讨论线程被处理。\n"
 
     # Extract Baloo's previous recommendations
     baloo_recs = _extract_baloo_recommendations(threads)
     baloo_section = ""
     if baloo_recs:
         baloo_section = f"""
-### Previous Baloo Recommendations
+### Baloo 此前的建议
 
 **IMPORTANT**: The following are Baloo's previous recommendations on this PR. When reviewing the same code locations:
 

@@ -73,7 +73,7 @@ def get_agent_options(model: str = None, thinking_level: str | None = None) -> P
             provider=provider,
             system_prompt=system_prompt,
             thinking_level=level,
-            max_turns=20,
+            max_turns=settings.agent_max_turns,
         )
 
     # 3. Full model name passthrough (assume anthropic)
@@ -83,7 +83,7 @@ def get_agent_options(model: str = None, thinking_level: str | None = None) -> P
             provider="anthropic",
             system_prompt=system_prompt,
             thinking_level=level,
-            max_turns=20,
+            max_turns=settings.agent_max_turns,
         )
 
     # 4. Default from settings — resolve short names first
@@ -103,5 +103,5 @@ def get_agent_options(model: str = None, thinking_level: str | None = None) -> P
         provider=settings.agent_provider,
         system_prompt=system_prompt,
         thinking_level=level,
-        max_turns=20,
+        max_turns=settings.agent_max_turns,
     )

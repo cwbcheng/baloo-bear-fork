@@ -207,7 +207,7 @@ class TestVerifyWebhookSignatureMalformed:
 
 class TestGetInstallationToken:
     def test_cache_hit_returns_cached_token_without_http(self, monkeypatch):
-        """When a cached token with >5min remaining exists, no HTTP call is made."""
+        """A cached token with >5min remaining is shared across auth instances."""
         from datetime import datetime, timedelta, timezone
         from unittest.mock import patch
 
@@ -234,7 +234,7 @@ class TestGetInstallationToken:
         auth._installation_tokens[42] = ("cached_token", future_expiry)
 
         with patch("httpx.post") as mock_post:
-            token = auth.get_installation_token(42)
+            token = auth_module.GitHubAuth().get_installation_token(42)
 
         assert token == "cached_token"
         mock_post.assert_not_called()
@@ -276,6 +276,7 @@ class TestGetInstallationToken:
 
         assert token == "fresh_token"
         mock_post.assert_called_once()
+        assert mock_post.call_args.kwargs["headers"]["X-GitHub-Stateless-S2S-Token"] == "disabled"
         assert 99 in auth._installation_tokens
 
 

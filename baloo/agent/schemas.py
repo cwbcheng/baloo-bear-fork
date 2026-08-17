@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from baloo.github.models import FindingCategory, GeneralFinding, ReviewComment, ReviewSeverity
 
@@ -66,6 +66,18 @@ class ReviewFinding(BaseModel):
     recommendation: str | None = None
     code_example: str | None = None
 
+    @field_validator("file", "severity", "category", "title", "description", mode="before")
+    @classmethod
+    def _coerce_required_str(cls, v: Any) -> Any:
+        """Coerce None to an empty string on required str fields.
+
+        Pydantic defaults only apply on missing keys — an explicit ``null``
+        from the model would otherwise fail validation and kill the whole review.
+        """
+        if v is None:
+            return ""
+        return v
+
     def get_line(self) -> int:
         """Return line as int, with fallback to 1."""
         try:
@@ -108,6 +120,14 @@ class GeneralReviewFinding(BaseModel):
     title: str = "Observation"
     description: str = ""
     recommendation: str | None = None
+
+    @field_validator("severity", "category", "title", "description", mode="before")
+    @classmethod
+    def _coerce_required_str(cls, v: Any) -> Any:
+        """Coerce None to an empty string on required str fields (see ReviewFinding)."""
+        if v is None:
+            return ""
+        return v
 
 
 class ReviewOutput(BaseModel):

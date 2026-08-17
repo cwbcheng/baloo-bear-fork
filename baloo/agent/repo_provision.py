@@ -58,6 +58,10 @@ _evict_lock: asyncio.Lock = asyncio.Lock()
 # delete a cache whose count is > 0.
 _active: dict[str, int] = {}
 
+# Transient network retry for clone/fetch/worktree provisioning.
+_PROVISION_ATTEMPTS = 3
+_PROVISION_BACKOFF_SECONDS = 5
+
 
 def _get_lock(key: str) -> asyncio.Lock:
     """Return the per-key lock, creating it on first use.
@@ -321,18 +325,41 @@ async def provision_repo(
         await _evict_if_over_cap(root, max_bytes)
 
         async with _get_lock(ckey):
-            if not (cdir / "HEAD").exists():
-                rc, out = await _run_git(build_clone_cmd(token, remote, cdir))
-                if rc != 0:
-                    raise RuntimeError(f"clone failed (rc={rc}): {out[-500:]}")
-            rc, out = await _run_git(build_fetch_cmd(token, cdir, head_sha))
-            if rc != 0:
-                raise RuntimeError(f"fetch failed (rc={rc}): {out[-500:]}")
-            # Clear stale worktree admin metadata left by crashed reviews.
-            await _run_git(build_worktree_prune_cmd(cdir))
-            rc, out = await _run_git(build_worktree_add_cmd(token, cdir, wt, head_sha))
-            if rc != 0:
-                raise RuntimeError(f"worktree add failed (rc={rc}): {out[-500:]}")
+            # Transient network failures (TLS resets, proxy hiccups) are common
+            # on WSL/proxied hosts; retry the clone/fetch/worktree sequence.
+            last_exc: Exception | None = None
+            for attempt in range(1, _PROVISION_ATTEMPTS + 1):
+                try:
+                    if not (cdir / "HEAD").exists():
+                        rc, out = await _run_git(build_clone_cmd(token, remote, cdir))
+                        if rc != 0:
+                            raise RuntimeError(f"clone failed (rc={rc}): {out[-500:]}")
+                    rc, out = await _run_git(build_fetch_cmd(token, cdir, head_sha))
+                    if rc != 0:
+                        raise RuntimeError(f"fetch failed (rc={rc}): {out[-500:]}")
+                    # Clear stale worktree admin metadata left by crashed reviews.
+                    await _run_git(build_worktree_prune_cmd(cdir))
+                    rc, out = await _run_git(build_worktree_add_cmd(token, cdir, wt, head_sha))
+                    if rc != 0:
+                        raise RuntimeError(f"worktree add failed (rc={rc}): {out[-500:]}")
+                    last_exc = None
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if attempt < _PROVISION_ATTEMPTS:
+                        delay = _PROVISION_BACKOFF_SECONDS * attempt
+                        logger.warning(
+                            "provision attempt %d/%d failed for %s@%s: %s — retrying in %ds",
+                            attempt,
+                            _PROVISION_ATTEMPTS,
+                            repo_full_name,
+                            head_sha[:12],
+                            exc,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+            if last_exc is not None:
+                raise last_exc
             _active[ckey] = _active.get(ckey, 0) + 1
             wt_created = True
 

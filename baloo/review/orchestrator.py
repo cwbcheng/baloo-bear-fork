@@ -8,6 +8,7 @@ import re
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from baloo.agent.config import get_agent_options
 from baloo.agent.pi_runtime import PIAgentBase
@@ -86,6 +87,10 @@ _REVIEW_SIDE_AGENT_METADATA_KEYS = (
     "sync_scope_decider",
 )
 
+# Empty working directory used for diff-only reviews so the agent's file tools
+# never wander through baloo's own source tree.
+_DIFF_ONLY_DIR = Path("/tmp/baloo-diff-only")
+
 
 def get_review_semaphore() -> asyncio.Semaphore:
     """Get or create the review semaphore with the configured limit."""
@@ -160,6 +165,15 @@ LINE_MATCH_TOLERANCE = 5
 LINE_MATCH_TOLERANCE_LOOSE = 18
 # Minimum similarity for loose (wider line window) dedupe against prior threads.
 _LINE_MATCH_LOOSE_MIN_SIMILARITY = 0.55
+
+
+def _first_line(text: str) -> str:
+    """Return the first non-empty line of a finding body (its title-ish text)."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
 
 
 def _build_thread_lookup(threads: list[DiscussionThread]) -> dict[str, list[DiscussionThread]]:
@@ -1212,7 +1226,7 @@ async def process_pr_review(
                 progress_comment_id = await github_client.post_comment(
                     repo_full_name,
                     pr_number,
-                    "🐻 Baloo is reviewing your code... This may take a moment.",
+                    "🐻 Baloo 正在审查你的代码... 可能需要几分钟。请稍候。",
                 )
 
             # Fetch PR context
@@ -1335,14 +1349,15 @@ async def process_pr_review(
                         repo_path,
                     )
                 else:
-                    # No checkout: the PI subprocess inherits baloo's own cwd
-                    # (/app in the container), so every PR-file read/grep/find
-                    # fails and the review is effectively diff-only. Surface why
-                    # — the master switch being off is otherwise totally silent.
+                    # No checkout: point the agent at an empty directory instead of
+                    # inheriting baloo's own cwd (/app in the container). Otherwise
+                    # the agent's read/grep/find tools would wander through baloo's
+                    # source and can produce garbage output (e.g. no structured JSON).
+                    _DIFF_ONLY_DIR.mkdir(parents=True, exist_ok=True)
+                    agent.options.cwd = str(_DIFF_ONLY_DIR)
                     logger.warning(
                         "No PR checkout for %s#%s (repo_cache_enabled=%s) — agent "
-                        "file tools will run against baloo's own cwd, not the PR; "
-                        "reviewing diff-only",
+                        "file tools run in an empty dir; reviewing diff-only",
                         repo_full_name,
                         pr_number,
                         settings.repo_cache_enabled,
@@ -1702,15 +1717,15 @@ async def process_pr_review(
                         )
             elif request_changes and not has_new_feedback:
                 logger.info(
-                    "Baloo is still waiting on existing threads; no new review posted to avoid noise."
+                    "Baloo 仍在等待既有讨论线程；为避免打扰，本次不重复发布审查。"
                 )
 
             # Post approval review if no blocking issues
             if not request_changes and approve:
                 logger.info("No blocking issues found, posting approval review")
-                approval_msg = "✅ No critical or high severity issues found. Safe to merge!"
+                approval_msg = "✅ 未发现严重或高等级问题，可以安全合并！"
                 if routed["checks"]:
-                    approval_msg += f"\n\n💡 {len(routed['checks'])} medium severity suggestion(s) available in the Checks tab."
+                    approval_msg += f"\n\n💡 {len(routed['checks'])} 条中等级建议见 Checks 页签。"
 
                 await github_client.post_review(
                     repo_full_name,
@@ -1723,44 +1738,85 @@ async def process_pr_review(
                     ),
                     diff=pr_context.diff,
                 )
+            # Comments-only review: non-blocking findings (MEDIUM/LOW) exist but
+            # auto-approve is off. Post them so the PR actually gets the feedback.
+            elif not request_changes and has_new_feedback and posted_review_result is None:
+                logger.info("Posting comments-only review with non-blocking findings")
+                posted_result = await github_client.post_review(
+                    repo_full_name,
+                    pr_number,
+                    ReviewResult(
+                        summary=review_result.summary,
+                        comments=routed["review"],
+                        approve=False,
+                        request_changes=False,
+                    ),
+                    diff=pr_context.diff,
+                )
+                if isinstance(posted_result, PostedReviewResult):
+                    posted_review_result = posted_result
+                    if posted_result.dropped:
+                        logger.warning(
+                            "Dropped %d/%d non-blocking review finding(s) while posting %s#%s",
+                            len(posted_result.dropped),
+                            posted_result.attempted,
+                            repo_full_name,
+                            pr_number,
+                        )
             # Update progress comment with completion status
             review_duration = int(time.time() - review_start_time)
             if progress_comment_id:
                 if has_new_feedback or (routed["review"] or follow_up_comments):
-                    # Review posted findings - update with summary
+                    # Review posted findings - update with summary.
+                    # Count general findings too so "Found N" matches the review
+                    # summary's "Total N" (which includes general observations).
                     counts = count_by_severity(decision_comments)
+                    for gf in general_findings:
+                        sev = gf.severity.value if hasattr(gf.severity, "value") else gf.severity
+                        counts[sev] = counts.get(sev, 0) + 1
+                    total_issues = len(decision_comments) + len(general_findings)
                     completion_msg = (
-                        f"🐻 Baloo review completed in {review_duration}s.\n\n"
-                        f"Found {len(decision_comments)} issue(s): "
-                        f"{counts.get(ReviewSeverity.CRITICAL.value, 0)} critical, "
-                        f"{counts.get(ReviewSeverity.HIGH.value, 0)} high, "
-                        f"{counts.get(ReviewSeverity.MEDIUM.value, 0)} medium, "
-                        f"{counts.get(ReviewSeverity.LOW.value, 0)} low."
+                        f"🐻 Baloo 审查完成，耗时 {review_duration} 秒。\n\n"
+                        f"共发现 {total_issues} 个问题： "
+                        f"{counts.get(ReviewSeverity.CRITICAL.value, 0)} 严重, "
+                        f"{counts.get(ReviewSeverity.HIGH.value, 0)} 高, "
+                        f"{counts.get(ReviewSeverity.MEDIUM.value, 0)} 中, "
+                        f"{counts.get(ReviewSeverity.LOW.value, 0)} 低。"
                     )
                     if posted_review_result is not None:
                         completion_msg += (
-                            f"\n\nPosted {posted_review_result.posted} inline comment(s)."
+                            f"\n\n已发布 {posted_review_result.posted} 条行内评论。"
                         )
                         if posted_review_result.dropped:
-                            completion_msg += f"\n\n⚠️ {len(posted_review_result.dropped)} finding(s) could not be placed inline (line not in diff):\n"
+                            completion_msg += f"\n\n⚠️ {len(posted_review_result.dropped)} 条问题无法定位到行内（行号不在 diff 中）：\n"
                             for d in posted_review_result.dropped:
                                 c = d.comment
                                 completion_msg += (
                                     f"\n**[{c.severity.value}] {c.category.value}** "
                                     f"`{c.path}:{c.line}`\n\n{c.body}\n"
                                 )
+                    if general_findings:
+                        completion_msg += (
+                            f"\n\n💬 {len(general_findings)} 条一般性观察"
+                            f"（无具体文件定位，详情见审查摘要）：\n"
+                        )
+                        for gf in general_findings:
+                            title = _first_line(gf.body) or "（无标题）"
+                            completion_msg += f"\n- {title}"
+                    if posted_review_result is None and not general_findings:
+                        completion_msg += "\n\n（未发布行内评论，详情见审查摘要）"
                 elif not request_changes and approve:
                     completion_msg = (
-                        f"✅ Baloo review completed in {review_duration}s. No issues found!"
+                        f"✅ Baloo 审查完成，耗时 {review_duration} 秒，未发现问题！"
                     )
                 elif awaiting_threads:
                     completion_msg = (
-                        f"🐻 Baloo review completed in {review_duration}s. "
-                        f"Still waiting on {awaiting_threads} existing thread(s)."
+                        f"🐻 Baloo 审查完成，耗时 {review_duration} 秒。"
+                        f"仍在等待 {awaiting_threads} 条既有讨论线程。"
                     )
                 else:
                     completion_msg = (
-                        f"🐻 Baloo review completed in {review_duration}s. No new issues found."
+                        f"🐻 Baloo 审查完成，耗时 {review_duration} 秒，未发现新问题。"
                     )
 
                 try:
@@ -1914,7 +1970,7 @@ async def process_pr_review(
                     await _gc.edit_comment(
                         repo_full_name,
                         progress_comment_id,
-                        "👋 This review was cancelled because a new commit was pushed. Baloo is starting a new review!",
+                        "👋 由于有新的提交推送，本次审查已取消。Baloo 正在开始新的审查！",
                     )
             except Exception:
                 pass

@@ -68,8 +68,8 @@ class DecisionEngine:
             Decision summary text
         """
         if approve:
-            return "✅ **Approved** - No significant issues found"
+            return "✅ **已通过** - 未发现重大问题"
         elif request_changes:
-            return "❌ **Changes Requested** - Please address critical/high severity issues"
+            return "❌ **需要修改** - 请处理严重/高等级问题"
         else:
-            return "💬 **Comments Only** - Review findings provided for consideration"
+            return "💬 **仅评论** - 审查意见供参考"

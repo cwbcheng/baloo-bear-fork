@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:18-alpine
+    image: postgres:17-alpine
     container_name: baloo-postgres
     restart: unless-stopped
     environment:
@@ -40,8 +40,12 @@ services:
       AGENT_MODEL: ${AGENT_MODEL:-claude-sonnet-4-6}
       AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-4096}
       AGENT_TEMPERATURE: ${AGENT_TEMPERATURE:-0.2}
+      AGENT_MAX_TURNS: ${AGENT_MAX_TURNS:-30}
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
       REVIEW_AUTO_APPROVE: ${REVIEW_AUTO_APPROVE:-false}
       REVIEW_MIN_SEVERITY: ${REVIEW_MIN_SEVERITY:-MEDIUM}
+      REVIEW_POST_ALL_SEVERITIES: ${REVIEW_POST_ALL_SEVERITIES:-false}
+      REVIEW_USE_REQUEST_CHANGES: ${REVIEW_USE_REQUEST_CHANGES:-false}
       DATABASE_ENABLED: ${DATABASE_ENABLED:-false}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-baloo}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-baloo}}
       INSTALLATION_ID: ${INSTALLATION_ID:-}

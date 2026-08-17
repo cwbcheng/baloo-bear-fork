@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     )
     agent_max_tokens: int = Field(default=4096, description="Max tokens for agent responses")
     agent_temperature: float = Field(default=0.2, description="Temperature for agent responses")
+    agent_max_turns: int = Field(
+        default=30,
+        description="Max agent turns (tool-call + response rounds) per review. "
+        "Large PRs with big files may need 40+; each extra turn is cheap on flash-tier models.",
+    )
     pi_binary_path: str = Field(
         default="pi",
         description="Path to the pi binary (or just 'pi' if on PATH)",
@@ -90,6 +95,16 @@ class Settings(BaseSettings):
     review_use_checks_api: bool = Field(
         default=True,
         description="Use GitHub Checks API for MEDIUM severity issues",
+    )
+    review_post_all_severities: bool = Field(
+        default=False,
+        description="Post MEDIUM and LOW findings as PR review comments instead of "
+        "filtering them (LOW) or routing to Checks API (MEDIUM)",
+    )
+    review_use_request_changes: bool = Field(
+        default=False,
+        description="Submit REQUEST_CHANGES review events when critical/high findings exist "
+        "(default False: Baloo comments but never blocks merging)",
     )
 
     # Database Configuration

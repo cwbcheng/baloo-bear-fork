@@ -44,33 +44,33 @@ class CommentFormatter:
         total = len(comments) + len(general_findings)
 
         summary_parts = []
-        summary_parts.append("## 🐻 Baloo Review Summary\n")
+        summary_parts.append("## 🐻 Baloo 审查摘要\n")
 
         if not comments and not general_findings:
-            summary_parts.append("✅ **No issues found!** Code looks good.")
+            summary_parts.append("✅ **未发现问题！** 代码看起来没问题。")
         else:
             stats = []
             if critical > 0:
-                stats.append(f"🔴 **{critical}** Critical")
+                stats.append(f"🔴 **{critical}** 严重")
             if high > 0:
-                stats.append(f"🟠 **{high}** High")
+                stats.append(f"🟠 **{high}** 高")
             if medium > 0:
-                stats.append(f"🟡 **{medium}** Medium")
+                stats.append(f"🟡 **{medium}** 中")
             if low > 0:
-                stats.append(f"🔵 **{low}** Low")
+                stats.append(f"🔵 **{low}** 低")
 
             summary_parts.append(" | ".join(stats))
-            summary_parts.append(f"\n**Total**: {total} issue(s) found")
+            summary_parts.append(f"\n**共发现**: {total} 个问题")
 
             if critical > 0 or high > 0:
-                summary_parts.append("\n⚠️ **Please address CRITICAL/HIGH issues before merging**")
+                summary_parts.append("\n⚠️ **合并前请先处理严重/高等级问题**")
             else:
                 summary_parts.append(
-                    "\n✅ **No blocking issues - safe to merge** (consider addressing MEDIUM/LOW items)"
+                    "\n✅ **无阻塞问题 - 可以合并**（建议关注中/低等级项）"
                 )
 
         if general_findings:
-            summary_parts.append("\n---\n\n**💬 General Observations**\n")
+            summary_parts.append("\n---\n\n**💬 一般性观察**\n")
             for gf in general_findings:
                 sev = gf.severity.value if hasattr(gf.severity, "value") else gf.severity
                 emoji = CommentFormatter.SEVERITY_EMOJIS.get(sev, "")
@@ -115,16 +115,16 @@ class CommentFormatter:
 
         return f"""
 <details>
-<summary>📊 Review Metadata</summary>
+<summary>📊 审查元数据</summary>
 
 <ul>
-  <li>**Model:** `{model}`</li>
-  <li>**Tokens:** {in_tok:,} (in) / {out_tok:,} (out)</li>
+  <li>**模型:** `{model}`</li>
+  <li>**Token:** {in_tok:,} (输入) / {out_tok:,} (输出)</li>
   {cache_info}
   {thinking_info}
-  <li>**Cost:** ${cost:.4f}</li>
-  <li>**Turns:** {turns}</li>
-  <li>**Duration:** {duration:.1f}s</li>
+  <li>**费用:** ${cost:.4f}</li>
+  <li>**轮次:** {turns}</li>
+  <li>**耗时:** {duration:.1f} 秒</li>
 </ul>
 
 </details>
