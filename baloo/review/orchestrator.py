@@ -1904,8 +1904,13 @@ async def process_pr_review(
                 agent_had_error = review_metadata.get("agent_error", False)
                 error_category = review_metadata.get("error_category")
                 error_detail = review_metadata.get("error_detail")
+                # fallback_model should name the model the review actually ran
+                # on after a fallback (metadata["model"]), NOT the primary
+                # model that failed.  Previously we stored primary_model here,
+                # so the dashboard showed the failed primary instead of the
+                # fallback that produced the review.
                 fallback_model = (
-                    review_metadata.get("primary_model")
+                    review_metadata.get("model")
                     if review_metadata.get("fallback_used")
                     else None
                 )

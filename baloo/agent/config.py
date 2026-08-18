@@ -98,6 +98,20 @@ def get_agent_options(model: str = None, thinking_level: str | None = None) -> P
             max_turns=max_turns,
         )
 
+    # A full "provider/model" string from settings must be split, exactly like
+    # the explicit override branch above; otherwise model keeps the provider
+    # prefix and downstream f"{provider}/{model}" renders double prefixes
+    # (e.g. "opencode-go/opencode-go/deepseek-v4-flash").
+    if default_model and "/" in default_model:
+        provider, model_id = default_model.split("/", 1)
+        return PIAgentOptions(
+            model=model_id,
+            provider=provider,
+            system_prompt=system_prompt,
+            thinking_level=level,
+            max_turns=settings.agent_max_turns,
+        )
+
     return PIAgentOptions(
         model=default_model,
         provider=settings.agent_provider,

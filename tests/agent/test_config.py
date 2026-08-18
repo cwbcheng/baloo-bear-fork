@@ -126,3 +126,30 @@ def test_gemini_3_1_pro_alias_resolves_same_as_premium():
     opts = get_agent_options("gemini-3.1-pro")
     assert opts.model == "gemini-3.1-pro-preview"
     assert opts.provider == "google"
+
+
+class TestGetAgentOptionsFromSettings:
+    """Settings-derived model strings must split provider/model correctly."""
+
+    def test_full_provider_model_string_from_settings(self, monkeypatch):
+        from baloo.agent import config as agent_config
+        from baloo.agent.config import get_agent_options
+        from baloo.config.settings import Settings
+
+        fake = Settings(
+            agent_model="opencode-go/deepseek-v4-flash",
+            agent_provider="opencode-go",
+            _env_file=None,
+        )
+        # config.py binds `settings` at import time; replace the whole module
+        # attribute so the default branch reads our fake instance.
+        monkeypatch.setattr(agent_config, "settings", fake)
+
+        options = get_agent_options()  # no override — settings path
+
+        # Regression: model must NOT carry the provider prefix, otherwise
+        # downstream f"{provider}/{model}" renders double prefixes
+        # ("opencode-go/opencode-go/deepseek-v4-flash").
+        assert options.model == "deepseek-v4-flash"
+        assert options.provider == "opencode-go"
+        assert f"{options.provider}/{options.model}" == "opencode-go/deepseek-v4-flash"
