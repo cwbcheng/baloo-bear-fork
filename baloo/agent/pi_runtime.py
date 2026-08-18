@@ -691,6 +691,18 @@ class PIAgentBase:
                     await review_logger.json_retry_failed(
                         raw_text=retry_raw_text or result.assistant_text
                     )
+                elif isinstance(structured_output, dict) and "error" in structured_output:
+                    # The retry session judged the input unconvertible (e.g.
+                    # mid-analysis prose).  Treat as a failure — never publish
+                    # a fabricated empty review for an incomplete analysis.
+                    await review_logger.json_retry_failed(
+                        raw_text=retry_raw_text or result.assistant_text
+                    )
+                    err = RuntimeError(
+                        f"JSON retry refused to convert: {structured_output['error']}"
+                    )
+                    err.metadata = metadata  # type: ignore[attr-defined]
+                    raise err
 
         if result.is_error:
             await review_logger.agent_error(
@@ -729,6 +741,10 @@ Produce the review JSON object for Baloo based on the analysis content:
 - If the text contains findings/issues, express them as `comments` (each with
   `path`, `line`, `severity` in CRITICAL/HIGH/MEDIUM/LOW, `category`, `body`).
 - If the text reports no issues, return {{"comments": [], "summary": "<brief>"}}.
+- CRITICAL: if the text is NOT a conclusion — e.g. it is mid-analysis prose
+  like "Now let me read the test files...", a partial thought, or a question —
+  then it CANNOT be converted.  Return {{"error": "incomplete analysis; cannot convert to review JSON"}}.
+  NEVER fabricate an empty review for text that is not a real conclusion.
 - Escape any quotes or control characters inside string values.
 - Do not add commentary, markdown fences, or extra keys.
 - Return ONLY the valid JSON object.
